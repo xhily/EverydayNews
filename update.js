@@ -10,6 +10,64 @@ const rlog = new RLog({
 const retry = 10;
 let tryTime = 1;
 
+// 生成RSS的函数
+function generateRSS(newsData) {
+  rlog.log("Start to generate RSS ...");
+  
+  const { date, content } = newsData;
+  const pubDate = moment(date, "YYYY/MM/DD").utcOffset(8).format("ddd, DD MMM YYYY HH:mm:ss ZZ");
+  const buildDate = moment().utcOffset(8).format("ddd, DD MMM YYYY HH:mm:ss ZZ");
+  
+  // 转义XML特殊字符
+  function escapeXml(text) {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+  
+  // 将所有新闻组合成一个HTML格式的描述
+  let newsContent = '';
+  content.forEach((item, index) => {
+    newsContent += `${index + 1}. ${escapeXml(item)}<br/><br/>`;
+  });
+  
+  const title = `${date}`;
+  const guid = `everydaynews-${date.replaceAll('/', '-')}`;
+  
+  const rssItems = `
+    <item>
+      <title>${escapeXml(title)}</title>
+      <description><![CDATA[ ${newsContent} ]]></description>
+      <pubDate>${pubDate}</pubDate>
+      <guid isPermaLink="false">${guid}</guid>
+      <link>https://news.ravelloh.top?date=${date.replaceAll("/","")}</link>
+    </item>`;
+  
+  const rssContent = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>EverydayNews</title>
+    <link>https://news.ravelloh.top</link>
+    <description>https://news.ravelloh.top</description>
+    <language>zh-CN</language>
+    <lastBuildDate>${buildDate}</lastBuildDate>
+    <pubDate>${pubDate}</pubDate>
+    <ttl>1440</ttl>
+    <generator>EverydayNews RSS Generator</generator>${rssItems}
+  </channel>
+</rss>`;
+
+  try {
+    fs.writeFileSync("./rss.xml", rssContent);
+    rlog.success("RSS file generated successfully.");
+  } catch (error) {
+    rlog.error("Failed to generate RSS file:", error.message);
+  }
+}
+
 async function main() {
   rlog.log("Start to get news ...");
   try {
@@ -48,8 +106,34 @@ async function main() {
       fs.mkdirSync(dirPath, { recursive: true });
     }
 
+    // 检查新闻是否更新
+    let shouldUpdateRSS = true;
+    try {
+      if (fs.existsSync("./latest.json")) {
+        const latestData = JSON.parse(fs.readFileSync("./latest.json", "utf8"));
+        if (latestData.date === date) {
+          rlog.log("News date is the same as latest.json, skipping RSS generation.");
+          shouldUpdateRSS = false;
+        } else {
+          rlog.log(`News date changed from ${latestData.date} to ${date}, will update RSS.`);
+        }
+      } else {
+        rlog.log("latest.json not found, will create RSS.");
+      }
+    } catch (error) {
+      rlog.warn("Failed to read latest.json:", error.message);
+      rlog.log("Will proceed with RSS generation.");
+    }
+
     fs.writeFileSync(filePath, JSON.stringify(newsData, null, 2));
     fs.writeFileSync("./latest.json", JSON.stringify(newsData, null, 2));
+
+    // 只在新闻更新时生成RSS文件
+    if (shouldUpdateRSS) {
+      generateRSS(newsData);
+    } else {
+      rlog.log("Skipped RSS generation as news hasn't been updated.");
+    }
 
     rlog.success("Save news successfully.");
   } catch (error) {
